@@ -38,7 +38,7 @@ def register(req: RegisterRequest, session: Session = Depends(get_session)):
     return forcing
 
 
-@router.post("{forcing_id}/mask", response_model=JobHandle)
+@router.post("/{forcing_id}/mask", response_model=JobHandle)
 def mask(forcing_id: int, session: Session = Depends(get_session)):
     forcing = session.get(Forcing, forcing_id)
     if forcing is None:
@@ -67,4 +67,37 @@ def mask(forcing_id: int, session: Session = Depends(get_session)):
         forcing_id=forcing_id,
         status=Status.completed,
         message=str(mask_path)
+    )
+
+@router.post("/{forcing_id}/spweights", response_model=JobHandle)
+def spweights(forcing_id: int, session: Session = Depends(get_session)):
+    forcing = session.get(Forcing, forcing_id)
+    if forcing is None:
+        raise HTTPException(status_code=400, detail=f"forcing id {forcing_id} not found")
+    
+    settings = get_settings()
+
+    mask_path    = Path(forcing.grid_dir).parent / f"{forcing.name}_mask.tif"
+    weights_path = settings.project_dir / "spweights" / f"spweights_{forcing.name}_to_CAMELS-GII.nc"
+    wrapper      = settings.project_dir / "scripts_temp/run_grid2poly.py"
+
+    if not mask_path.exists():
+        raise HTTPException(status_code=400, detail=f"Mask not found at {mask_path}. Run /mask first.")
+
+    result = subprocess.run(
+        ["python", str(wrapper), str(mask_path), str(weights_path)],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"run_spweights.py failed:\n{result.stderr.strip()}"
+        )
+
+    return JobHandle(
+        forcing_id=forcing_id,
+        status=Status.completed,
+        message=str(weights_path),
     )
