@@ -35,3 +35,7 @@ class ForcingResponse(BaseModel):
     name: str
     grid_dir: str
 
+class JobHandle(BaseModel):
+    forcing_id: int
+    status: Status
+    message: str = ""
