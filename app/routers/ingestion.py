@@ -5,6 +5,7 @@ from pathlib import Path
 from ..models import ForcingResponse, Forcing, RegisterRequest, JobHandle, Status
 from ..database import get_session
 from ..config import get_settings
+from ..ssh import run_remote
 
 router = APIRouter(prefix="/ingest", tags=['ingestion'])
 
@@ -49,7 +50,7 @@ def mask(forcing_id: int, session: Session = Depends(get_session)):
     if not nc_files:
         raise HTTPException(status_code=404, detail=f"No nc files in directory")
     
-    mask_path = grid_dir / f"{forcing.name}_masK_latlon.tif"
+    mask_path = grid_dir.parent / f"{forcing.name}_mask_latlon.tif"
 
     settings = get_settings()
     script = settings.scripts_dir / "make_latlon_mask.py"
@@ -77,27 +78,32 @@ def spweights(forcing_id: int, session: Session = Depends(get_session)):
     
     settings = get_settings()
 
-    mask_path    = Path(forcing.grid_dir).parent / f"{forcing.name}_mask.tif"
+    mask_path    = Path(forcing.grid_dir).parent / f"{forcing.name}_mask_latlon.tif"
     weights_path = settings.project_dir / "spweights" / f"spweights_{forcing.name}_to_CAMELS-GII.nc"
-    wrapper      = settings.project_dir / "scripts_temp/run_grid2poly.py"
+    job_script   = settings.project_dir / Path("wendian-job-scripts/spweights_job.sh")
 
     if not mask_path.exists():
         raise HTTPException(status_code=400, detail=f"Mask not found at {mask_path}. Run /mask first.")
 
-    result = subprocess.run(
-        ["python", str(wrapper), str(mask_path), str(weights_path)],
-        capture_output=True,
-        text=True,
-    )
+    sbatch_cmd = f"GRID_NAME={mask_path} MAPPING_NC_NAME={weights_path} sbatch {job_script}"
 
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=f"run_spweights.py failed:\n{result.stderr.strip()}"
-        )
+    returncode, stdout, stderr = run_remote(sbatch_cmd)
 
+    if returncode != 0:
+        raise HTTPException(status_code=500, detail=f"sbatch failed. \n{stderr.strip()}")
+    
+    # sbatch will print "submitted batch job {ID}" to stdout, grabbing from that
+    slurm_job_id = stdout.strip().split()[-1]
     return JobHandle(
         forcing_id=forcing_id,
-        status=Status.completed,
-        message=str(weights_path),
+        status=Status.running,
+        message=f"SLURM job {slurm_job_id}"
     )
+
+
+@router.post("/{forcing_id}/basin_remapping")
+def basin_remapping(forcing_id: int, session: Session = Depends(get_session)):
+    forcing = session.get(Forcing, forcing_id)
+    if not forcing:
+        raise HTTPException(status_code=400, detail="forcing id {forcing_id} not found")
+    
