@@ -3,6 +3,13 @@ from typing import Optional
 from pydantic import BaseModel
 from sqlmodel import SQLModel, Field
 
+class Stage(str, Enum):
+    mask = "mask"
+    spweights = "spweights"
+    remapping = "remapping"
+    nh_reformat = "nh_reformat"
+    train = "train"
+
 class Status(str, Enum):
     waiting = "waiting"
     running = "running"
@@ -18,6 +25,12 @@ class Forcing(SQLModel, table=True):
     tmin_var: Optional[str] = Field(default=None)
     tmax_var: Optional[str] = Field(default=None)
 
+class Job(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    forcing_id: int = Field(foreign_key="forcing_id", index=True)
+    stage: Stage
+    slurm_job_id: str
+    status: Status
 
 #-------------------------
 # SCHEMA

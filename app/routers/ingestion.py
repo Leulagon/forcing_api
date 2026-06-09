@@ -2,7 +2,7 @@ import subprocess
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session
 from pathlib import Path
-from ..models import ForcingResponse, Forcing, RegisterRequest, JobHandle, Status
+from ..models import ForcingResponse, Forcing, RegisterRequest, JobHandle, Status, Job, Stage
 from ..database import get_session
 from ..config import get_settings
 from ..ssh import run_remote
@@ -94,6 +94,16 @@ def spweights(forcing_id: int, session: Session = Depends(get_session)):
     
     # sbatch will print "submitted batch job {ID}" to stdout, grabbing from that
     slurm_job_id = stdout.strip().split()[-1]
+
+    job = Job(
+        forcing_id=forcing_id,
+        stage=Stage.spweights,
+        slurm_job_id=slurm_job_id,
+        status=Status.running
+    )
+    session.add(job)
+    session.commit()
+
     return JobHandle(
         forcing_id=forcing_id,
         status=Status.running,
